@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+
+}
+
+enum Frequency {
+  DAILY
+  WEEKLY
+  CUSTOM
+}
+
+model User {
+  id         Int      @id @default(autoincrement())
+  telegramId String   @unique
+  username   String?
+  firstName  String?
+  timezone   String   @default("UTC")
+  createdAt  DateTime @default(now())
+  habits     Habit[]
+}
+
+model Habit {
+  id          Int         @id @default(autoincrement())
+  userId      Int
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  emoji       String      @default("✅")
+  frequency   Frequency   @default(DAILY)
+  target      Int         @default(1)
+  archived    Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  completions Completion[]
+  reminders   Reminder[]
+}
+
+model Completion {
+  id          Int      @id @default(autoincrement())
+  habitId     Int
+  habit       Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  completedAt DateTime @default(now())
+  date        String
+  value       Float    @default(1.0)
+
+  @@unique([habitId, date])
+}
+
+model Reminder {
+  id      Int     @id @default(autoincrement())
+  habitId Int
+  habit   Habit   @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  time    String
+  enabled Boolean @default(true)
+}
