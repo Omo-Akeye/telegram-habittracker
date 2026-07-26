@@ -1,14 +1,15 @@
 import { Controller, Post, Body, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RemindersService } from './reminders.service';
 import { CreateReminderDto } from './dto/create-reminder.dto';
-import { TelegramGuard } from '../common/guards/telegram.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TelegramUser } from '../common/decorators/telegram-user.decorator';
 import { User } from '@prisma/client';
 
 @ApiTags('reminders')
+@ApiBearerAuth()
 @Controller('habits/:id/reminders')
-@UseGuards(TelegramGuard)
+@UseGuards(JwtAuthGuard)
 export class RemindersController {
   constructor(private readonly remindersService: RemindersService) {}
 

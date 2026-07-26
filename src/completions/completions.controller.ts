@@ -1,14 +1,15 @@
 import { Controller, Post, Delete, Body, Param, ParseIntPipe, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CompletionsService } from './completions.service';
 import { CreateCompletionDto } from './dto/create-completion.dto';
-import { TelegramGuard } from '../common/guards/telegram.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TelegramUser } from '../common/decorators/telegram-user.decorator';
 import { User } from '@prisma/client';
 
 @ApiTags('completions')
+@ApiBearerAuth()
 @Controller('habits/:id/completions')
-@UseGuards(TelegramGuard)
+@UseGuards(JwtAuthGuard)
 export class CompletionsController {
   constructor(private readonly completionsService: CompletionsService) {}
 

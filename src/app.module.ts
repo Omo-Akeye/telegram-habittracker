@@ -13,6 +13,7 @@ import { RemindersModule } from './reminders/reminders.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { CommonModule } from './common/common.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { CommonModule } from './common/common.module';
     TelegramModule,
     SchedulerModule,
     CommonModule,
+    HealthModule,
   ],
   providers: [
     // Apply rate limiting globally to all endpoints

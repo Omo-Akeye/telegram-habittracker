@@ -21,15 +21,31 @@ export class SchedulerService {
   @Cron(CronExpression.EVERY_MINUTE)
   async checkReminders() {
     try {
-      const users = await this.prisma.user.findMany();
+      // Optimized: query only users who have active reminders, not all users
+      const usersWithReminders = await this.prisma.user.findMany({
+        where: {
+          habits: {
+            some: {
+              archived: false,
+              reminders: {
+                some: {
+                  enabled: true,
+                },
+              },
+            },
+          },
+        },
+      });
 
-      for (const user of users) {
+      for (const user of usersWithReminders) {
         try {
           const userTime = dayjs().tz(user.timezone || 'UTC');
           const currentTime = userTime.format('HH:mm');
           await this.remindersService.processReminders(user.id, currentTime);
         } catch (error) {
-          this.logger.error(`Error processing reminders for user ${user.id}: ${error.message}`);
+          this.logger.error(
+            `Error processing reminders for user ${user.id}: ${error instanceof Error ? error.message : error}`,
+          );
         }
       }
 

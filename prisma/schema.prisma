@@ -43,6 +43,8 @@ model Habit {
   createdAt   DateTime    @default(now())
   completions Completion[]
   reminders   Reminder[]
+
+  @@index([userId])
 }
 
 model Completion {
@@ -55,6 +57,8 @@ model Completion {
   note        String?
 
   @@unique([habitId, date])
+  @@index([habitId])
+  @@index([date])
 }
 
 model Reminder {
@@ -65,15 +69,22 @@ model Reminder {
   enabled   Boolean       @default(true)
   createdAt DateTime      @default(now())
   logs      ReminderLog[]
+
+  @@index([habitId])
+  @@index([time, enabled])
 }
 
 model ReminderLog {
   id           Int            @id @default(autoincrement())
   reminderId   Int
   reminder     Reminder       @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  /// Denormalized from reminder.habitId for direct query access without joining through Reminder
   habitId      Int
   date         String
   sentAt       DateTime       @default(now())
   status       ReminderStatus
   snoozedUntil DateTime?
+
+  @@index([reminderId])
+  @@index([date, status])
 }

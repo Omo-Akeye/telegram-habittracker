@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateHabitDto } from './dto/create-habit.dto';
 import { UpdateHabitDto } from './dto/update-habit.dto';
+import dayjs from 'dayjs';
 
 @Injectable()
 export class HabitsService {
@@ -18,7 +19,10 @@ export class HabitsService {
         target: dto.target ?? 1,
       },
       include: {
-        completions: true,
+        completions: {
+          where: { date: { gte: dayjs().subtract(7, 'day').format('YYYY-MM-DD') } },
+          orderBy: { completedAt: 'desc' },
+        },
         reminders: true,
       },
     });
@@ -28,7 +32,10 @@ export class HabitsService {
     return this.prisma.habit.findMany({
       where: { userId, archived: false },
       include: {
-        completions: true,
+        completions: {
+          where: { date: { gte: dayjs().subtract(7, 'day').format('YYYY-MM-DD') } },
+          orderBy: { completedAt: 'desc' },
+        },
         reminders: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -39,7 +46,10 @@ export class HabitsService {
     const habit = await this.prisma.habit.findFirst({
       where: { id, userId },
       include: {
-        completions: true,
+        completions: {
+          where: { date: { gte: dayjs().subtract(7, 'day').format('YYYY-MM-DD') } },
+          orderBy: { completedAt: 'desc' },
+        },
         reminders: true,
       },
     });
@@ -58,7 +68,10 @@ export class HabitsService {
       where: { id },
       data: dto,
       include: {
-        completions: true,
+        completions: {
+          where: { date: { gte: dayjs().subtract(7, 'day').format('YYYY-MM-DD') } },
+          orderBy: { completedAt: 'desc' },
+        },
         reminders: true,
       },
     });

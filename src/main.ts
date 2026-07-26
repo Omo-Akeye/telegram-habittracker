@@ -7,12 +7,15 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Enable graceful shutdown hooks
+  app.enableShutdownHooks();
+
   app.use(helmet());
 
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',') ?? false,
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
-    allowedHeaders: ['content-type', 'x-telegram-id', 'x-api-key'],
+    allowedHeaders: ['content-type', 'authorization'],
   });
 
   app.setGlobalPrefix('api');
@@ -30,12 +33,14 @@ async function bootstrap() {
       .setTitle('HabitBot')
       .setDescription('Telegram Habit Tracker API')
       .setVersion('1.0')
-      .addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' })
+      .addBearerAuth()
       .addTag('habits')
       .addTag('completions')
       .addTag('users')
       .addTag('statistics')
+      .addTag('reminders')
       .addTag('telegram')
+      .addTag('health')
       .build();
 
     const document = SwaggerModule.createDocument(app, config);

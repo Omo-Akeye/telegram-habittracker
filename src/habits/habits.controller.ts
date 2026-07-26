@@ -9,17 +9,18 @@ import {
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { HabitsService } from './habits.service';
 import { CreateHabitDto } from './dto/create-habit.dto';
 import { UpdateHabitDto } from './dto/update-habit.dto';
-import { TelegramGuard } from '../common/guards/telegram.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TelegramUser } from '../common/decorators/telegram-user.decorator';
 import { User } from '@prisma/client';
 
 @ApiTags('habits')
+@ApiBearerAuth()
 @Controller('habits')
-@UseGuards(TelegramGuard)
+@UseGuards(JwtAuthGuard)
 export class HabitsController {
   constructor(private readonly habitsService: HabitsService) {}
 

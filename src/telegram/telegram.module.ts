@@ -1,6 +1,10 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TelegramService } from './telegram.service';
 import { TelegramController } from './telegram.controller';
+import { TelegramStateService } from './telegram-state.service';
+import { TelegramKeyboardsService } from './telegram-keyboards.service';
+import { TelegramCommandsHandler } from './telegram-commands.handler';
+import { TelegramCallbacksHandler } from './telegram-callbacks.handler';
 import { UsersModule } from '../users/users.module';
 import { HabitsModule } from '../habits/habits.module';
 import { CompletionsModule } from '../completions/completions.module';
@@ -17,7 +21,13 @@ import { AuthModule } from '../auth/auth.module';
     forwardRef(() => RemindersModule),
     AuthModule,
   ],
-  providers: [TelegramService],
+  providers: [
+    TelegramService,
+    TelegramStateService,
+    TelegramKeyboardsService,
+    TelegramCommandsHandler,
+    TelegramCallbacksHandler,
+  ],
   controllers: [TelegramController],
   exports: [TelegramService],
 })

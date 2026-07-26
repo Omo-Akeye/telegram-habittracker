@@ -18,16 +18,13 @@ export class UsersService {
   }
 
   async findOrCreate(telegramId: string, username?: string, firstName?: string) {
-    const existing = await this.prisma.user.findUnique({
+    return this.prisma.user.upsert({
       where: { telegramId },
-    });
-
-    if (existing) {
-      return existing;
-    }
-
-    return this.prisma.user.create({
-      data: {
+      update: {
+        ...(username !== undefined && { username }),
+        ...(firstName !== undefined && { firstName }),
+      },
+      create: {
         telegramId,
         username,
         firstName,

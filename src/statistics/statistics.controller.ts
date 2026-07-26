@@ -1,13 +1,14 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { StatisticsService } from './statistics.service';
-import { TelegramGuard } from '../common/guards/telegram.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TelegramUser } from '../common/decorators/telegram-user.decorator';
 import { User } from '@prisma/client';
 
 @ApiTags('statistics')
+@ApiBearerAuth()
 @Controller('statistics')
-@UseGuards(TelegramGuard)
+@UseGuards(JwtAuthGuard)
 export class StatisticsController {
   constructor(private readonly statisticsService: StatisticsService) {}
 

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { HabitsService } from '../habits/habits.service';
 import { CompletionsService } from '../completions/completions.service';
+import { Frequency } from '@prisma/client';
 import dayjs from 'dayjs';
 
 @Injectable()
@@ -14,11 +15,12 @@ export class StatisticsService {
 
   async getStats(userId: number) {
     const habits = await this.habitsService.findAllForUserRaw(userId);
-    const totalHabits = habits.filter((h) => !h.archived).length;
+    const activeHabits = habits.filter((h) => !h.archived);
+    const totalHabits = activeHabits.length;
     const todayCount = await this.completionsService.countToday(userId);
-    const streak = await this.calculateStreak(userId);
-    const longestStreak = await this.calculateLongestStreak(userId);
-    const completionRate = await this.calculateCompletionRate(userId);
+    const streak = await this.calculateStreak(userId, activeHabits);
+    const longestStreak = await this.calculateLongestStreak(userId, activeHabits);
+    const completionRate = await this.calculateCompletionRate(userId, activeHabits);
 
     return {
       currentStreak: streak,
@@ -29,17 +31,57 @@ export class StatisticsService {
     };
   }
 
-  private async calculateStreak(userId: number): Promise<number> {
+  /**
+   * Checks if a given date is a "due day" for the user based on their habits.
+   * A day is due if at least one active habit is scheduled for it.
+   */
+  private isDueDay(date: dayjs.Dayjs, habits: Array<{ frequency: Frequency; days: string | null }>): boolean {
+    const dayName = date.format('ddd').toUpperCase();
+
+    for (const habit of habits) {
+      if (habit.frequency === Frequency.DAILY) {
+        return true;
+      }
+
+      if (habit.frequency === Frequency.CUSTOM && habit.days) {
+        const activeDays = habit.days.split(',').map((d) => d.trim().toUpperCase());
+        if (activeDays.includes(dayName)) {
+          return true;
+        }
+      }
+
+      if (habit.frequency === Frequency.WEEKLY) {
+        // Weekly habits count every day as potentially due
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async calculateStreak(
+    userId: number,
+    activeHabits: Array<{ frequency: Frequency; days: string | null }>,
+  ): Promise<number> {
+    if (activeHabits.length === 0) return 0;
+
     const completionDates = await this.getCompletionDates(userId);
     if (completionDates.length === 0) return 0;
 
     let streak = 0;
-    const today = dayjs().format('YYYY-MM-DD');
+    const today = dayjs();
     const datesSet = new Set(completionDates);
 
     for (let i = 0; ; i++) {
-      const date = dayjs(today).subtract(i, 'day').format('YYYY-MM-DD');
-      if (datesSet.has(date)) {
+      const date = today.subtract(i, 'day');
+      const dateStr = date.format('YYYY-MM-DD');
+
+      if (!this.isDueDay(date, activeHabits)) {
+        // Not a due day — skip without breaking streak
+        continue;
+      }
+
+      if (datesSet.has(dateStr)) {
         streak++;
       } else {
         break;
@@ -49,32 +91,47 @@ export class StatisticsService {
     return streak;
   }
 
-  private async calculateLongestStreak(userId: number): Promise<number> {
+  private async calculateLongestStreak(
+    userId: number,
+    activeHabits: Array<{ frequency: Frequency; days: string | null }>,
+  ): Promise<number> {
+    if (activeHabits.length === 0) return 0;
+
     const completionDates = await this.getCompletionDates(userId);
     if (completionDates.length === 0) return 0;
 
     const dates = [...new Set(completionDates)].sort();
-    let longest = 1;
-    let current = 1;
+    const datesSet = new Set(dates);
 
-    for (let i = 1; i < dates.length; i++) {
-      const prev = dayjs(dates[i - 1]);
-      const curr = dayjs(dates[i]);
-      if (curr.diff(prev, 'day') === 1) {
+    // Walk from the earliest completion date to today, tracking streaks
+    const start = dayjs(dates[0]);
+    const end = dayjs();
+    let longest = 0;
+    let current = 0;
+
+    for (let d = start; d.isBefore(end) || d.isSame(end, 'day'); d = d.add(1, 'day')) {
+      const dateStr = d.format('YYYY-MM-DD');
+
+      if (!this.isDueDay(d, activeHabits)) {
+        // Non-due day: don't break or increment
+        continue;
+      }
+
+      if (datesSet.has(dateStr)) {
         current++;
         longest = Math.max(longest, current);
       } else {
-        current = 1;
+        current = 0;
       }
     }
 
     return longest;
   }
 
-  private async calculateCompletionRate(userId: number): Promise<number> {
-    const habits = await this.habitsService.findAllForUserRaw(userId);
-    const activeHabits = habits.filter((h) => !h.archived);
-
+  private async calculateCompletionRate(
+    userId: number,
+    activeHabits: Array<{ id: number; archived: boolean }>,
+  ): Promise<number> {
     if (activeHabits.length === 0) return 0;
 
     const today = dayjs().format('YYYY-MM-DD');

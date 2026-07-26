@@ -4,6 +4,8 @@ import { HabitsService } from '../habits/habits.service';
 import { TelegramService } from '../telegram/telegram.service';
 import dayjs from 'dayjs';
 
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
+
 @Injectable()
 export class RemindersService {
   private readonly logger = new Logger(RemindersService.name);
@@ -33,7 +35,7 @@ export class RemindersService {
     }
   }
 
-  private async sendWithRetry(reminder: any, attempt = 1) {
+  private async sendWithRetry(reminder: { id: number; habitId: number; habit: { userId: number; title: string } }, attempt = 0): Promise<void> {
     try {
       const user = await this.prisma.user.findUnique({ where: { id: reminder.habit.userId } });
       if (!user) return;
@@ -42,11 +44,13 @@ export class RemindersService {
       await this.logSent(reminder.id, reminder.habitId);
       this.logger.log(`Reminder sent for habit "${reminder.habit.title}" to user ${user.telegramId}`);
     } catch (error) {
-      if (attempt < 3) {
-        this.logger.warn(`Retry ${attempt} for reminder ${reminder.id}`);
+      if (attempt < RETRY_DELAYS_MS.length) {
+        const delay = RETRY_DELAYS_MS[attempt];
+        this.logger.warn(`Retry ${attempt + 1} for reminder ${reminder.id} after ${delay}ms`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
         await this.sendWithRetry(reminder, attempt + 1);
       } else {
-        this.logger.error(`Failed to send reminder ${reminder.id} after 3 attempts`, error);
+        this.logger.error(`Failed to send reminder ${reminder.id} after ${RETRY_DELAYS_MS.length} attempts`, error);
       }
     }
   }
