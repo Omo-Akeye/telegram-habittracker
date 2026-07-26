@@ -107,12 +107,39 @@ All REST endpoints require `x-telegram-id` header.
 
 Swagger docs available at `/api/docs`.
 
-## Database Models
+## Reminder System
+
+The scheduler runs every minute and:
+
+1. Converts UTC to each user's timezone
+2. Finds due reminders (matching HH:MM, enabled, non-archived habit)
+3. Checks for snoozed reminders past their snoozedUntil
+4. Sends Telegram message with inline buttons
+5. Logs every send in `ReminderLog`
+6. Retries up to 3 times on Telegram API failure
+7. Marks stale `SENT` logs as `EXPIRED` after 2 hours
+
+### Reminder Buttons
+
+| Button | Action |
+|---|---|
+| ✅ Completed | Creates completion, updates log, replies with streak |
+| ⏰ Snooze | Offers 15/30/60 min, stores snoozedUntil |
+| ❌ Skip | Marks log as SKIPPED |
+
+### Duplicate Prevention
+
+- One log per habit per day
+- Before sending, checks for existing `SENT`/`COMPLETED`/`SKIPPED`/`EXPIRED` log
+- Expired reminders are not re-sent
+
+### Database Models
 
 - **User** — id, telegramId, username, firstName, timezone
 - **Habit** — id, userId, title, emoji, frequency (DAILY/WEEKLY/CUSTOM), target, archived
 - **Completion** — id, habitId, date (once per calendar day), value
-- **Reminder** — id, habitId, time (HH:MM), enabled
+- **Reminder** — id, habitId, time (HH:MM), enabled, createdAt
+- **ReminderLog** — id, reminderId, habitId, date, sentAt, status (SENT/COMPLETED/SKIPPED/SNOOZED/EXPIRED), snoozedUntil
 
 ## Design
 

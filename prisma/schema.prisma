@@ -4,13 +4,20 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-
 }
 
 enum Frequency {
   DAILY
   WEEKLY
   CUSTOM
+}
+
+enum ReminderStatus {
+  SENT
+  COMPLETED
+  SKIPPED
+  SNOOZED
+  EXPIRED
 }
 
 model User {
@@ -49,9 +56,22 @@ model Completion {
 }
 
 model Reminder {
-  id      Int     @id @default(autoincrement())
-  habitId Int
-  habit   Habit   @relation(fields: [habitId], references: [id], onDelete: Cascade)
-  time    String
-  enabled Boolean @default(true)
+  id        Int           @id @default(autoincrement())
+  habitId   Int
+  habit     Habit         @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  time      String
+  enabled   Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  logs      ReminderLog[]
+}
+
+model ReminderLog {
+  id           Int            @id @default(autoincrement())
+  reminderId   Int
+  reminder     Reminder       @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  habitId      Int
+  date         String
+  sentAt       DateTime       @default(now())
+  status       ReminderStatus
+  snoozedUntil DateTime?
 }

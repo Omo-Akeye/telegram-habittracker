@@ -1,13 +1,16 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Telegraf } from 'telegraf';
 import { UsersService } from '../users/users.service';
 import { HabitsService } from '../habits/habits.service';
 import { CompletionsService } from '../completions/completions.service';
 import { StatisticsService } from '../statistics/statistics.service';
 import { RemindersService } from '../reminders/reminders.service';
+import { AuthService } from '../auth/auth.service';
 import { Frequency } from '@prisma/client';
 import dayjs from 'dayjs';
+import { escapeMarkdown } from '../common/utils/escape-markdown';
 
 interface NewHabitState {
   step: 'title' | 'frequency' | 'reminder';
@@ -15,10 +18,12 @@ interface NewHabitState {
   emoji?: string;
   frequency?: Frequency;
   target?: number;
+  createdAt: number;
 }
 
 interface EditState {
   habitId: number;
+  createdAt: number;
 }
 
 @Injectable()
@@ -34,7 +39,9 @@ export class TelegramService implements OnModuleInit {
     private readonly habitsService: HabitsService,
     private readonly completionsService: CompletionsService,
     private readonly statisticsService: StatisticsService,
+    @Inject(forwardRef(() => RemindersService))
     private readonly remindersService: RemindersService,
+    private readonly authService: AuthService,
   ) {
     const token = this.configService.get<string>('BOT_TOKEN');
     if (!token) {
@@ -44,6 +51,7 @@ export class TelegramService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    this.registerErrorHandler();
     this.registerCommands();
     this.registerActions();
     this.registerTextHandler();
@@ -55,6 +63,36 @@ export class TelegramService implements OnModuleInit {
     }
   }
 
+  private registerErrorHandler() {
+    this.bot.catch((err: any, ctx: any) => {
+      this.logger.error(`Unhandled error while processing update ${ctx?.update?.update_id}`, err);
+    });
+  }
+
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  cleanStaleStates() {
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    let cleaned = 0;
+
+    for (const [userId, state] of this.newHabitStates) {
+      if (state.createdAt < cutoff) {
+        this.newHabitStates.delete(userId);
+        cleaned++;
+      }
+    }
+
+    for (const [userId, state] of this.editStates) {
+      if (state.createdAt < cutoff) {
+        this.editStates.delete(userId);
+        cleaned++;
+      }
+    }
+
+    if (cleaned > 0) {
+      this.logger.log(`Cleaned ${cleaned} stale conversation states`);
+    }
+  }
+
   async handleUpdate(update: any) {
     try {
       await this.bot.handleUpdate(update);
@@ -63,23 +101,45 @@ export class TelegramService implements OnModuleInit {
     }
   }
 
+  async sendReminder(telegramId: string, habit: any, reminderId: number) {
+    const safeTitle = escapeMarkdown(habit.title || '');
+    await this.bot.telegram.sendMessage(telegramId, `${habit.emoji || '✅'} *${safeTitle}*\n\nHave you completed today's habit?`, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ Completed', callback_data: `complete_reminder_${reminderId}` },
+            { text: '⏰ Snooze', callback_data: `snooze_reminder_${reminderId}` },
+            { text: '❌ Skip', callback_data: `skip_reminder_${reminderId}` },
+          ],
+        ],
+      },
+    });
+  }
+
   private registerCommands() {
     this.bot.start(async (ctx) => {
-      const telegramId = ctx.from.id.toString();
-      const username = ctx.from.username;
-      const firstName = ctx.from.first_name;
+      try {
+        const telegramId = ctx.from.id.toString();
+        const username = ctx.from.username;
+        const firstName = ctx.from.first_name;
 
-      const user = await this.usersService.findOrCreate(telegramId, username, firstName);
+        const user = await this.usersService.findOrCreate(telegramId, username, firstName);
 
-      await ctx.reply(
-        `Welcome ${user.firstName || 'to HabitBot'}! 🎯\n\n` +
-        'Track your habits right from Telegram.\n\n' +
-        'Commands:\n' +
-        '/new - Create a new habit\n' +
-        '/habits - View your habits\n' +
-        '/stats - View your statistics\n' +
-        '/help - Show available commands',
-      );
+        const safeName = escapeMarkdown(user.firstName || 'to HabitBot');
+        await ctx.reply(
+          `Welcome ${safeName}! 🎯\n\n` +
+          'Track your habits right from Telegram.\n\n' +
+          'Commands:\n' +
+          '/new - Create a new habit\n' +
+          '/habits - View your habits\n' +
+          '/stats - View your statistics\n' +
+          '/help - Show available commands',
+        );
+      } catch (error) {
+        this.logger.error('Error handling /start command', error);
+        await ctx.reply('Error starting bot. Please try again later.');
+      }
     });
 
     this.bot.help(async (ctx) => {
@@ -89,16 +149,42 @@ export class TelegramService implements OnModuleInit {
         '/new - Create a new habit\n' +
         '/habits - View all your habits\n' +
         '/stats - View your statistics\n' +
+        '/token - Get your API access token\n' +
         '/help - Show this message',
       );
     });
 
-    this.bot.command('new', async (ctx) => {
-      const telegramId = ctx.from.id.toString();
-      await this.usersService.findOrCreate(telegramId, ctx.from.username, ctx.from.first_name);
+    this.bot.command('token', async (ctx) => {
+      try {
+        const telegramId = ctx.from.id.toString();
+        // Ensure user exists first
+        await this.usersService.findOrCreate(telegramId, ctx.from.username, ctx.from.first_name);
+        const token = await this.authService.generateToken(telegramId);
+        await ctx.reply(
+          '🔑 *Your API Access Token*\n\n' +
+          'Use this as a Bearer token in API requests:\n' +
+          '`Authorization: Bearer ' + token + '`\n\n' +
+          '⚠️ Keep this token private. It expires in 30 days.\n' +
+          'Run /token again to generate a new one.',
+          { parse_mode: 'Markdown' },
+        );
+      } catch (error) {
+        await ctx.reply('Error generating token. Please try again.');
+      }
+    });
 
-      this.newHabitStates.set(ctx.from.id, { step: 'title' });
-      await ctx.reply('What is the name of your habit?');
+    this.bot.command('new', async (ctx) => {
+      try {
+        const telegramId = ctx.from.id.toString();
+        await this.usersService.findOrCreate(telegramId, ctx.from.username, ctx.from.first_name);
+
+        this.editStates.delete(ctx.from.id);
+        this.newHabitStates.set(ctx.from.id, { step: 'title', createdAt: Date.now() });
+        await ctx.reply('What is the name of your habit?');
+      } catch (error) {
+        this.logger.error('Error handling /new command', error);
+        await ctx.reply('Error creating habit. Please try again later.');
+      }
     });
 
     this.bot.command('habits', async (ctx) => {
@@ -116,9 +202,10 @@ export class TelegramService implements OnModuleInit {
           const today = dayjs().format('YYYY-MM-DD');
           const completedToday = habit.completions.some((c) => c.date === today);
           const status = completedToday ? '✅' : '⬜';
+          const safeTitle = escapeMarkdown(habit.title || '');
 
           await ctx.reply(
-            `${status} ${habit.emoji || '📋'} *${habit.title}*\n` +
+            `${status} ${habit.emoji || '📋'} *${safeTitle}*\n` +
             `Frequency: ${habit.frequency} | Target: ${habit.target}`,
             {
               parse_mode: 'Markdown',
@@ -179,7 +266,7 @@ export class TelegramService implements OnModuleInit {
           ],
         });
       } catch (error: any) {
-        await ctx.answerCbQuery(error.message || 'Error completing habit');
+        await ctx.answerCbQuery('Error completing habit');
       }
     });
 
@@ -201,13 +288,14 @@ export class TelegramService implements OnModuleInit {
           ],
         });
       } catch (error: any) {
-        await ctx.answerCbQuery(error.message || 'Error undoing completion');
+        await ctx.answerCbQuery('Error undoing completion');
       }
     });
 
     this.bot.action(/edit_(\d+)/, async (ctx) => {
       const habitId = parseInt(ctx.match[1]);
-      this.editStates.set(ctx.from.id, { habitId });
+      this.newHabitStates.delete(ctx.from.id);
+      this.editStates.set(ctx.from.id, { habitId, createdAt: Date.now() });
       await ctx.answerCbQuery();
       await ctx.reply('Enter a new title for this habit:');
     });
@@ -222,7 +310,7 @@ export class TelegramService implements OnModuleInit {
         await ctx.answerCbQuery('Habit deleted 🗑');
         await ctx.deleteMessage();
       } catch (error: any) {
-        await ctx.answerCbQuery(error.message || 'Error deleting habit');
+        await ctx.answerCbQuery('Error deleting habit');
       }
     });
 
@@ -238,6 +326,95 @@ export class TelegramService implements OnModuleInit {
           'When should I remind you?\n' +
           'Enter time in HH:MM format (24h), or type "skip" for no reminder.',
         );
+      }
+    });
+
+    this.bot.action(/complete_reminder_(\d+)/, async (ctx) => {
+      try {
+        const reminderId = parseInt(ctx.match[1]);
+        const telegramId = ctx.from.id.toString();
+        const user = await this.usersService.findByTelegramId(telegramId);
+        const reminder = await this.remindersService.getReminder(reminderId);
+
+        if (!reminder) {
+          await ctx.answerCbQuery('Reminder not found');
+          return;
+        }
+
+        // H7 FIX: Verify the reminder belongs to the user pressing the button
+        if (reminder.habit.userId !== user.id) {
+          await ctx.answerCbQuery('This reminder does not belong to you');
+          return;
+        }
+
+        await this.completionsService.create(reminder.habitId, user.id, {});
+
+        const log = await this.remindersService.findTodayLog(reminderId);
+        if (log) {
+          await this.remindersService.markCompleted(log.id);
+        }
+
+        const stats = await this.statisticsService.getStats(user.id);
+
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(
+          `🔥 *Nice!*\n\nCurrent streak: *${stats.currentStreak} days*`,
+          { parse_mode: 'Markdown' },
+        );
+      } catch (error: any) {
+        await ctx.answerCbQuery('Error completing habit');
+      }
+    });
+
+    this.bot.action(/snooze_reminder_(\d+)/, async (ctx) => {
+      const reminderId = parseInt(ctx.match[1]);
+      await ctx.answerCbQuery();
+      await ctx.editMessageText('Snooze for how long?', {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '15 min', callback_data: `snooze_15_${reminderId}` },
+              { text: '30 min', callback_data: `snooze_30_${reminderId}` },
+              { text: '1 hour', callback_data: `snooze_60_${reminderId}` },
+            ],
+          ],
+        },
+      });
+    });
+
+    this.bot.action(/snooze_(\d+)_(\d+)/, async (ctx) => {
+      try {
+        const minutes = parseInt(ctx.match[1]);
+        const reminderId = parseInt(ctx.match[2]);
+
+        const log = await this.remindersService.findTodayLog(reminderId);
+        if (!log) {
+          await ctx.answerCbQuery('Reminder log not found');
+          return;
+        }
+
+        const snoozedUntil = dayjs().add(minutes, 'minute').toDate();
+        await this.remindersService.markSnoozed(log.id, snoozedUntil);
+        await ctx.answerCbQuery(`Snoozed for ${minutes} minutes`);
+        await ctx.editMessageText(`⏰ I'll remind you again in ${minutes} minutes.`);
+      } catch (error: any) {
+        await ctx.answerCbQuery('Error snoozing');
+      }
+    });
+
+    this.bot.action(/skip_reminder_(\d+)/, async (ctx) => {
+      try {
+        const reminderId = parseInt(ctx.match[1]);
+
+        const log = await this.remindersService.findTodayLog(reminderId);
+        if (log) {
+          await this.remindersService.markSkipped(log.id);
+        }
+
+        await ctx.answerCbQuery();
+        await ctx.editMessageText('No worries 🌱\n\nTomorrow is another chance.');
+      } catch (error: any) {
+        await ctx.answerCbQuery('Error skipping');
       }
     });
   }
@@ -290,9 +467,10 @@ export class TelegramService implements OnModuleInit {
 
               await this.remindersService.create(habit.id, user.id, time);
 
+              const safeTitle = escapeMarkdown(newHabitState.title || '');
               await ctx.reply(
                 `Habit created! 🎉\n\n` +
-                `${newHabitState.emoji || '✅'} *${newHabitState.title}*\n` +
+                `${newHabitState.emoji || '✅'} *${safeTitle}*\n` +
                 `Frequency: ${newHabitState.frequency}\n` +
                 `Reminder: ${time}\n\n` +
                 `View your habits with /habits`,
@@ -322,16 +500,17 @@ export class TelegramService implements OnModuleInit {
       const newTitle = ctx.message.text.trim();
       const habit = await this.habitsService.update(editState.habitId, user.id, { title: newTitle });
 
+      const safeTitle = escapeMarkdown(habit.title || '');
       await ctx.reply(
         `Habit updated! ✏️\n\n` +
-        `${habit.emoji || '✅'} *${habit.title}*\n` +
+        `${habit.emoji || '✅'} *${safeTitle}*\n` +
         `Frequency: ${habit.frequency} | Target: ${habit.target}`,
         { parse_mode: 'Markdown' },
       );
 
       this.editStates.delete(ctx.from.id);
     } catch (error: any) {
-      await ctx.reply(error.message || 'Error updating habit. Please try again.');
+      await ctx.reply('Error updating habit. Please try again.');
       this.editStates.delete(ctx.from.id);
     }
   }
@@ -341,9 +520,10 @@ export class TelegramService implements OnModuleInit {
     const user = await this.usersService.findByTelegramId(telegramId);
     const habit = await this.createHabit(user.id, state);
 
+    const safeTitle = escapeMarkdown(state.title || '');
     await ctx.reply(
       `Habit created! 🎉\n\n` +
-      `${state.emoji || '✅'} *${state.title}*\n` +
+      `${state.emoji || '✅'} *${safeTitle}*\n` +
       `Frequency: ${state.frequency}\n\n` +
       `View your habits with /habits`,
       { parse_mode: 'Markdown' },

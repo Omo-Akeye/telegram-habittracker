@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -15,6 +17,11 @@ import { CommonModule } from './common/common.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    // Rate limiting: 20 req per 10s (burst), 100 req per 60s (sustained)
+    ThrottlerModule.forRoot([
+      { name: 'short', ttl: 10000, limit: 20 },
+      { name: 'long', ttl: 60000, limit: 100 },
+    ]),
     ConfigModule,
     PrismaModule,
     AuthModule,
@@ -26,6 +33,10 @@ import { CommonModule } from './common/common.module';
     TelegramModule,
     SchedulerModule,
     CommonModule,
+  ],
+  providers: [
+    // Apply rate limiting globally to all endpoints
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}
