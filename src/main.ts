@@ -7,7 +7,7 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Enable graceful shutdown hooks
+
   app.enableShutdownHooks();
 
   app.use(helmet());
