@@ -24,6 +24,7 @@ interface NewHabitState {
 
 interface EditState {
   habitId: number;
+  step?: 'menu' | 'title' | 'emoji' | 'target';
   createdAt: number;
 }
 
@@ -175,6 +176,11 @@ export class TelegramService implements OnModuleInit {
           '/habits - View your habits\n' +
           '/stats - View your statistics\n' +
           '/help - Show available commands',
+          {
+            reply_markup: {
+              inline_keyboard: [[{ text: '➕ Create my first habit', callback_data: 'new_habit' }]],
+            },
+          }
         );
       } catch (error) {
         this.logger.error('Error handling /start command', error);
@@ -220,11 +226,18 @@ export class TelegramService implements OnModuleInit {
         this.editStates.delete(ctx.from.id);
         this.noteStates.delete(ctx.from.id);
         this.newHabitStates.set(ctx.from.id, { step: 'title', createdAt: Date.now() });
-        await ctx.reply('What is the name of your habit?');
+        await ctx.reply('What\'s the goal you\'re working towards?');
       } catch (error) {
         this.logger.error('Error handling /new command', error);
         await ctx.reply('Error creating habit. Please try again later.');
       }
+    });
+
+    this.bot.command('cancel', async (ctx) => {
+      this.newHabitStates.delete(ctx.from.id);
+      this.editStates.delete(ctx.from.id);
+      this.noteStates.delete(ctx.from.id);
+      await ctx.reply('Action cancelled. What would you like to do next?');
     });
 
     this.bot.command('habits', async (ctx) => {
@@ -234,7 +247,11 @@ export class TelegramService implements OnModuleInit {
         const habits = await this.habitsService.findAll(user.id);
 
         if (habits.length === 0) {
-          await ctx.reply('You have no habits yet. Create one with /new');
+          await ctx.reply('You have no habits yet. Create one with /new', {
+            reply_markup: {
+              inline_keyboard: [[{ text: '➕ Create a Habit', callback_data: 'new_habit' }]],
+            },
+          });
           return;
         }
 
@@ -301,6 +318,22 @@ export class TelegramService implements OnModuleInit {
   }
 
   private registerActions() {
+    this.bot.action('new_habit', async (ctx) => {
+      try {
+        const telegramId = ctx.from.id.toString();
+        await this.usersService.findOrCreate(telegramId, ctx.from.username, ctx.from.first_name);
+
+        this.editStates.delete(ctx.from.id);
+        this.noteStates.delete(ctx.from.id);
+        this.newHabitStates.set(ctx.from.id, { step: 'title', createdAt: Date.now() });
+        await ctx.answerCbQuery();
+        await ctx.reply('What\'s the goal you\'re working towards?');
+      } catch (error) {
+        this.logger.error('Error handling new_habit action', error);
+        await ctx.answerCbQuery('Error starting new habit flow');
+      }
+    });
+
     this.bot.action(/emoji_(.+)/, async (ctx) => {
       const emoji = ctx.match[1];
       const state = this.newHabitStates.get(ctx.from.id);
@@ -482,9 +515,42 @@ export class TelegramService implements OnModuleInit {
       const habitId = parseInt(ctx.match[1]);
       this.newHabitStates.delete(ctx.from.id);
       this.noteStates.delete(ctx.from.id);
-      this.editStates.set(ctx.from.id, { habitId, createdAt: Date.now() });
+      this.editStates.set(ctx.from.id, { habitId, step: 'menu', createdAt: Date.now() });
       await ctx.answerCbQuery();
-      await ctx.reply('Enter a new title for this habit:');
+      await ctx.editMessageText('What would you like to edit?', {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✏️ Title', callback_data: `edit_title_${habitId}` },
+              { text: '😊 Emoji', callback_data: `edit_emoji_${habitId}` },
+            ],
+            [
+              { text: '🎯 Target', callback_data: `edit_target_${habitId}` },
+            ],
+          ],
+        },
+      });
+    });
+
+    this.bot.action(/edit_title_(\d+)/, async (ctx) => {
+      const habitId = parseInt(ctx.match[1]);
+      this.editStates.set(ctx.from.id, { habitId, step: 'title', createdAt: Date.now() });
+      await ctx.answerCbQuery();
+      await ctx.editMessageText('Enter a new title for this habit:');
+    });
+
+    this.bot.action(/edit_emoji_(\d+)/, async (ctx) => {
+      const habitId = parseInt(ctx.match[1]);
+      this.editStates.set(ctx.from.id, { habitId, step: 'emoji', createdAt: Date.now() });
+      await ctx.answerCbQuery();
+      await ctx.editMessageText('Reply with a new emoji icon for this habit:');
+    });
+
+    this.bot.action(/edit_target_(\d+)/, async (ctx) => {
+      const habitId = parseInt(ctx.match[1]);
+      this.editStates.set(ctx.from.id, { habitId, step: 'target', createdAt: Date.now() });
+      await ctx.answerCbQuery();
+      await ctx.editMessageText('Reply with a new target number (e.g., 5):');
     });
 
     this.bot.action(/delete_(\d+)/, async (ctx) => {
@@ -530,7 +596,14 @@ export class TelegramService implements OnModuleInit {
         await ctx.answerCbQuery();
         await ctx.editMessageText(
           `🔥 *Nice!*\n\nCurrent streak: *${stats.currentStreak} days*`,
-          { parse_mode: 'Markdown' },
+          { 
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Undo', callback_data: `undo_${reminder.habitId}` }]
+              ]
+            }
+          },
         );
       } catch (error: any) {
         await ctx.answerCbQuery('Error completing habit');
@@ -603,8 +676,9 @@ export class TelegramService implements OnModuleInit {
     const row2 = dayButtons.slice(4, 7);
 
     await ctx.reply(
-      'Select active days for your habit:',
+      `Select active days for your habit:\n\n*Currently Selected:* ${selectedDays.length ? selectedDays.join(', ') : 'None'}`,
       {
+        parse_mode: 'Markdown',
         reply_markup: {
           inline_keyboard: [
             row1,
@@ -628,13 +702,19 @@ export class TelegramService implements OnModuleInit {
     const row1 = dayButtons.slice(0, 4);
     const row2 = dayButtons.slice(4, 7);
 
-    await ctx.editMessageReplyMarkup({
-      inline_keyboard: [
-        row1,
-        row2,
-        [{ text: '🏁 Confirm Selection', callback_data: 'confirm_days' }],
-      ],
-    });
+    await ctx.editMessageText(
+      `Select active days for your habit:\n\n*Currently Selected:* ${selectedDays.length ? selectedDays.join(', ') : 'None'}`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            row1,
+            row2,
+            [{ text: '🏁 Confirm Selection', callback_data: 'confirm_days' }],
+          ],
+        },
+      }
+    );
   }
 
   private async sendTargetKeyboard(ctx: any) {
@@ -819,6 +899,18 @@ export class TelegramService implements OnModuleInit {
             break;
           }
 
+          case 'target': {
+            const target = parseInt(ctx.message.text.trim());
+            if (isNaN(target) || target <= 0) {
+              await ctx.reply('Please enter a valid positive number for the target, or choose from the options above.');
+              return;
+            }
+            newHabitState.target = target;
+            newHabitState.step = 'reminder';
+            await this.sendReminderTimePresets(ctx);
+            break;
+          }
+
           case 'reminder': {
             const time = ctx.message.text.trim();
 
@@ -861,8 +953,26 @@ export class TelegramService implements OnModuleInit {
     try {
       const telegramId = ctx.from.id.toString();
       const user = await this.usersService.findByTelegramId(telegramId);
-      const newTitle = ctx.message.text.trim();
-      const habit = await this.habitsService.update(editState.habitId, user.id, { title: newTitle });
+      const text = ctx.message.text.trim();
+      let updateData: any = {};
+
+      if (editState.step === 'title') {
+        updateData.title = text;
+      } else if (editState.step === 'emoji') {
+        updateData.emoji = text;
+      } else if (editState.step === 'target') {
+        const target = parseInt(text);
+        if (isNaN(target) || target <= 0) {
+          await ctx.reply('Please enter a valid positive number for the target.');
+          return;
+        }
+        updateData.target = target;
+      } else {
+        await ctx.reply('Please select what to edit from the menu.');
+        return;
+      }
+
+      const habit = await this.habitsService.update(editState.habitId, user.id, updateData);
 
       const safeTitle = escapeMarkdown(habit.title || '');
       await ctx.reply(
