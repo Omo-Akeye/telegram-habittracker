@@ -16,6 +16,11 @@ export class CreateHabitDto {
   @IsEnum(Frequency)
   frequency: Frequency;
 
+  @ApiPropertyOptional({ example: 'MON,WED,FRI' })
+  @IsString()
+  @IsOptional()
+  days?: string;
+
   @ApiPropertyOptional({ example: 1 })
   @IsInt()
   @Min(1)

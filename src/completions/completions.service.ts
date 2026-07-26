@@ -33,6 +33,7 @@ export class CompletionsService {
         habitId,
         date: today,
         value: dto.value ?? 1.0,
+        note: dto.note,
       },
       include: {
         habit: true,
@@ -59,6 +60,24 @@ export class CompletionsService {
 
     return this.prisma.completion.delete({
       where: { id: completion.id },
+    });
+  }
+
+  async updateNoteToday(habitId: number, userId: number, note: string) {
+    await this.habitsService.findOne(habitId, userId);
+    const today = dayjs().format('YYYY-MM-DD');
+
+    const completion = await this.prisma.completion.findUnique({
+      where: { habitId_date: { habitId, date: today } },
+    });
+
+    if (!completion) {
+      throw new NotFoundException('No completion found for today');
+    }
+
+    return this.prisma.completion.update({
+      where: { id: completion.id },
+      data: { note },
     });
   }
 

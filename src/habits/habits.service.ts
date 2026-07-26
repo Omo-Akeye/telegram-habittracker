@@ -14,6 +14,7 @@ export class HabitsService {
         title: dto.title,
         emoji: dto.emoji ?? '✅',
         frequency: dto.frequency,
+        days: dto.days,
         target: dto.target ?? 1,
       },
       include: {

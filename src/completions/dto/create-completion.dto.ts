@@ -1,4 +1,4 @@
-import { IsOptional, IsNumber, Min } from 'class-validator';
+import { IsOptional, IsNumber, Min, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateCompletionDto {
@@ -7,4 +7,9 @@ export class CreateCompletionDto {
   @Min(0)
   @IsOptional()
   value?: number;
+
+  @ApiPropertyOptional({ example: 'Completed 5km run today!' })
+  @IsString()
+  @IsOptional()
+  note?: string;
 }

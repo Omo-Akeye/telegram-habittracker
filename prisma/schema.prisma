@@ -37,6 +37,7 @@ model Habit {
   title       String
   emoji       String      @default("✅")
   frequency   Frequency   @default(DAILY)
+  days        String?
   target      Int         @default(1)
   archived    Boolean     @default(false)
   createdAt   DateTime    @default(now())
@@ -51,6 +52,7 @@ model Completion {
   completedAt DateTime @default(now())
   date        String
   value       Float    @default(1.0)
+  note        String?
 
   @@unique([habitId, date])
 }
